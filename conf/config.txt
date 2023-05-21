@@ -1,0 +1,5 @@
+Timeout       35
+TimeoutPoll   10
+ConnTimeout   50
+RcvBuf         0
+

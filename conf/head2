@@ -1,0 +1,6 @@
+HEAD /cgi-bin/script HTTP/1.1
+Host: localhost
+User-Agent: client
+# Connection: close
+Connection: keep-alive
+

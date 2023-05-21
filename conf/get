@@ -1,0 +1,6 @@
+GET /1.txt HTTP/1.1
+Host: 192.168.100.80
+User-Agent: client
+# Connection: close
+Connection: keep-alive
+
