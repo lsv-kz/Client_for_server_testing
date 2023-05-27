@@ -92,8 +92,8 @@ void end_request(Connect *r)
     }
     else
     {
-        fprintf(stderr, "<%s:%d:%d:%d> [%d] read_bytes=%ld\n",  
-                __func__, __LINE__, r->num_conn, r->num_req, r->respStatus, r->read_bytes);
+        fprintf(stderr, "[%d/%d/%d]<%s:%d> [%d] read_bytes=%ld\n", r->num_proc, r->num_conn, r->num_req,  
+                __func__, __LINE__, r->respStatus, r->read_bytes);
     }
 
     shutdown(r->servSocket, SHUT_RDWR);
@@ -116,7 +116,7 @@ static int set_poll(int num_proc)
         if (r->sock_timer == 0)
             r->sock_timer = t;
 
-        if (((t - r->sock_timer) >= conf->Timeout) && (r->sock_timer != 0))
+        if ((t - r->sock_timer) >= conf->Timeout)
         {
             fprintf(stderr, "[%d]<%s:%d> Timeout=%ld\n", num_proc, __func__, __LINE__, t - r->sock_timer);
             r->err = -1;
@@ -233,7 +233,7 @@ mtx_.unlock();
 //======================================================================
 int send_headers(Connect *r)
 {
-    int wr = write_to_serv(r, r->req.p + r->req.i, r->req.len - r->req.i);
+    int wr = write_to_serv(r, r->req.ptr + r->req.i, r->req.len - r->req.i);
     if (wr < 0)
     {
         if (wr == ERR_TRY_AGAIN)
@@ -262,8 +262,7 @@ static void worker(Connect *r, int num_proc)
                 r->operation = READ_RESP_HEADERS;
                 r->event = POLLIN;
                 r->resp.len = 0;
-                r->resp.lenTail = 0;
-                r->resp.tail = NULL;
+                r->resp.ptr = NULL;
                 r->resp.p_newline = r->resp.buf;
                 r->cont_len = 0;
             }
@@ -298,8 +297,8 @@ static void worker(Connect *r, int num_proc)
         }
         else if (ret > 0)
         {
-            allRD += r->resp.lenTail;
-            r->read_bytes += r->resp.lenTail;
+            allRD += r->resp.len;
+            r->read_bytes += r->resp.len;
             r->operation = READ_ENTITY;
             if (!strcmp(Method, "HEAD"))
             {
@@ -311,7 +310,6 @@ static void worker(Connect *r, int num_proc)
             r->sock_timer = 0;
             if (r->chunk.chunk)
             {
-                r->chunk.len = 0;
                 int ret = chunk(r);
                 if (ret < 0)
                 {
@@ -324,14 +322,10 @@ static void worker(Connect *r, int num_proc)
                     del_from_list(r);
                     end_request(r);
                 }
-                else
-                {
-                    //fprintf(stderr, "<%s:%d> -------------\n", __func__, __LINE__);
-                }
             }
             else
             {
-                r->cont_len -= r->resp.lenTail;
+                r->cont_len -= r->resp.len;
                 if (r->cont_len == 0)
                 {
                     del_from_list(r);
@@ -386,10 +380,10 @@ static void worker(Connect *r, int num_proc)
         }
         else
         {
-            if (r->chunk.len > 0)
+            if (r->chunk.size > 0)
             {
-                r->resp.tail = r->resp.buf;
-                int len = (r->chunk.len > (int)sizeof(r->resp.buf)) ? (int)sizeof(r->resp.buf) : r->chunk.len;
+                r->resp.ptr = r->resp.buf;
+                int len = (r->chunk.size > (int)sizeof(r->resp.buf)) ? (int)sizeof(r->resp.buf) : r->chunk.size;
                 int ret = read_from_server(r, r->resp.buf, len);
                 if (ret < 0)
                 {
@@ -412,8 +406,8 @@ static void worker(Connect *r, int num_proc)
                 {
                     allRD += ret;
                     r->read_bytes += ret;
-                    r->chunk.len -= ret;
-                    if (r->chunk.len == 0)
+                    r->chunk.size -= ret;
+                    if (r->chunk.size == 0)
                     {
                         r->chunk.size = -1;
                         if (r->chunk.end)
@@ -454,7 +448,6 @@ static void worker(Connect *r, int num_proc)
                         allRD += ret;
                         r->read_bytes += ret;
                         r->resp.len += ret;
-                        r->resp.lenTail += ret;
                         ret = chunk(r);
                         if (ret < 0)
                         {
@@ -484,61 +477,70 @@ static void worker(Connect *r, int num_proc)
 //======================================================================
 int chunk(Connect *r)
 {
+    if (!r->resp.ptr || !r->resp.len)
+    {
+        r->resp.len = 0;
+        r->resp.ptr = r->resp.buf;
+        r->chunk.size = -1;
+        return 0;
+    }
+
     while (1)
     {
         r->chunk.size = get_size_chunk(r);
         if (r->chunk.size > 0)
         {
-            if (r->resp.lenTail > (r->chunk.size + 2))
+            if (r->resp.len > (r->chunk.size + 2))
             {
-                r->resp.tail += (r->chunk.size + 2);
-                r->resp.lenTail -= (r->chunk.size + 2);
+                r->resp.ptr += (r->chunk.size + 2);
+                r->resp.len -= (r->chunk.size + 2);
                 continue;
             }
-            else if (r->resp.lenTail == (r->chunk.size + 2))
+            else if (r->resp.len == (r->chunk.size + 2))
             {
-                r->resp.len = r->resp.lenTail = 0;
-                r->resp.tail = r->resp.buf;
+                r->resp.len = 0;
+                r->resp.ptr = r->resp.buf;
                 r->chunk.size = -1;
                 break;
             }
-            else // r->resp.lenTail < (r->chunk.size + 2)
+            else // r->resp.len < (r->chunk.size + 2)
             {
-                int len_read_data = r->resp.lenTail;
-                r->chunk.len = r->chunk.size - len_read_data + 2;
-                r->resp.len = r->resp.lenTail = 0;
+                r->chunk.size -= (r->resp.len - 2);
+                r->resp.len = 0;
                 break;
             }
         }
         else if (r->chunk.size == 0)
         {
             r->chunk.end = 1;
-            if (r->resp.lenTail == 2)
+            if (r->resp.len == 2)
             {
                 return 1;
             }
-            else if (r->resp.lenTail < 2)
+            else if (r->resp.len < 2)
             {
-                r->chunk.len = 2 - r->resp.lenTail;
-                r->resp.len = r->resp.lenTail = 0;
+                r->chunk.size = 2 - r->resp.len;
+                r->resp.len = 0;
                 break;
             }
             else
             {
-                fprintf(stderr, "<%s:%d:%d:%d> ??? r->resp.lenTail=%d\n", 
-                        __func__, __LINE__, r->num_conn, r->num_req, r->resp.lenTail);
+                fprintf(stderr, "<%s:%d:%d:%d> ??? r->resp.len=%d\n", 
+                        __func__, __LINE__, r->num_conn, r->num_req, r->resp.len);
                 return -1;
             }
         }
-        else // r->chunk.size < 0
+        else
         {
-fprintf(stderr, "<%s:%d:%d:%d> ??? chunk=%d, cont_len=%ld\n", 
-    __func__, __LINE__, r->num_conn, r->num_req, r->chunk.chunk, r->cont_len);
-
-            memmove(r->resp.buf, r->resp.tail, r->resp.lenTail);
-            r->resp.len = r->resp.lenTail;
-            r->resp.tail = r->resp.buf;
-            break;
+            if (r->chunk.size == ERR_TRY_AGAIN)
+            {
+                memmove(r->resp.buf, r->resp.ptr, r->resp.len);
+                r->resp.ptr = r->resp.buf;
+                r->chunk.size = -1;
+                break;
+            }
+            else
+                return -1;
         }
     }
     return 0;

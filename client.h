@@ -62,6 +62,7 @@ struct Connect {
 
     OPERATION_TYPE operation;
 
+    int    num_proc;
     int    num_conn;
     int    num_req;
 
@@ -75,7 +76,7 @@ struct Connect {
 
     struct
     {
-        const char *p;
+        const char *ptr;
         int len;
         int i;
     } req;
@@ -83,9 +84,8 @@ struct Connect {
     struct
     {
         char  buf[32768];
-        long  len;
-        int   lenTail;
-        char  *tail;
+        int   len;
+        char  *ptr;
         char  *p_newline;
     } resp;
 
@@ -93,7 +93,6 @@ struct Connect {
     {
         int  chunk;
         int  size;
-        int  len;
         int  end;
     } chunk;
 
@@ -139,5 +138,6 @@ int strlcmp_case(const char *s1, const char *s2, int len);
 int parse_headers(Connect *r, char *s);
 int create_log_file();
 void hex_dump_stderr(const void *p, int n);
+void hex_dump_stderr(const char *s, int line, const void *p, int n);
 
 #endif

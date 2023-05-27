@@ -440,16 +440,16 @@ int read_from_server(Connect *req, char *buf, int len)
 int find_empty_line(Connect *req)
 {
     char *pCR, *pLF;
-    while (req->resp.lenTail > 0)
+    while (req->resp.len > 0)
     {
         int i = 0, len_line = 0;
         pCR = pLF = NULL;
-        while (i < req->resp.lenTail)
+        while (i < req->resp.len)
         {
             char ch = *(req->resp.p_newline + i);
             if (ch == '\r')// found CR
             {
-                if (i == (req->resp.lenTail - 1))
+                if (i == (req->resp.len - 1))
                     return 0;
                 if (pCR)
                     return -1;
@@ -477,11 +477,11 @@ int find_empty_line(Connect *req)
 
             if (len_line == 0)
             {
-                req->resp.lenTail -= i;
-                if (req->resp.lenTail > 0)
-                    req->resp.tail = pLF + 1;
+                req->resp.len -= i;
+                if (req->resp.len > 0)
+                    req->resp.ptr = pLF + 1;
                 else
-                    req->resp.tail = NULL;
+                    req->resp.ptr = NULL;
                 return 1;
             }
 
@@ -502,7 +502,7 @@ int find_empty_line(Connect *req)
                 return -1;
             }
 
-            req->resp.lenTail -= i;
+            req->resp.len -= i;
             req->resp.p_newline = pLF + 1;
         }
         else if (pCR && (!pLF))
@@ -523,32 +523,31 @@ int read_http_headers(Connect *r)
         return -1;
     }
 
-    int n = read_from_server(r, r->resp.buf + r->resp.len, len);
-    if (n < 0)
+    int ret = read_from_server(r, r->resp.buf + r->resp.len, len);
+    if (ret < 0)
     {
-        if (n == ERR_TRY_AGAIN)
+        if (ret == ERR_TRY_AGAIN)
             return ERR_TRY_AGAIN;
         return -1;
     }
-    else if (n == 0)
+    else if (ret == 0)
     {
         fprintf(stderr, "<%s:%d:%d:%d> Error server hung up\n", __func__, __LINE__, r->num_conn, r->num_req);
         return -1;
     }
 
-    r->resp.lenTail += n;
-    r->resp.len += n;
+    r->resp.len += ret;
     r->resp.buf[r->resp.len] = 0;
 
-    n = find_empty_line(r);
-    if (n == 1) // empty line found
+    ret = find_empty_line(r);
+    if (ret == 1) // empty line found
     {
-        return r->resp.len;
+        return 1;
     }
-    else if (n < 0) // error
+    else if (ret < 0) // error
     {
-        fprintf(stderr, "<%s:%d> Error find_empty_line()=%d\n", __func__, __LINE__, n);
-        return n;
+        fprintf(stderr, "<%s:%d> Error find_empty_line()=%d\n", __func__, __LINE__, ret);
+        return -1;
     }
 
     return 0;

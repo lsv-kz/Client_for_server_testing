@@ -60,7 +60,7 @@ int create_client_socket_ip4(const char *ip, const char *port)
 {
     int sockfd;
     struct sockaddr_in sin4;
-    int sock_opt = 1;
+    const int sock_opt = 1;
 
     memset(&sin4, 0, sizeof(sin4));
 
@@ -81,7 +81,7 @@ int create_client_socket_ip4(const char *ip, const char *port)
     }
 
     setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (void *)&sock_opt, sizeof(sock_opt));
-    sock_opt = 1;
+
     ioctl(sockfd, FIONBIO, &sock_opt);
 
     if (connect(sockfd, (struct sockaddr *)(&sin4), sizeof(sin4)) != 0)
@@ -93,17 +93,7 @@ int create_client_socket_ip4(const char *ip, const char *port)
             return -1;
         }
     }
-/*
-    int flags = fcntl(sockfd, F_GETFL);
-    if (flags == -1)
-        printf("<%s> Error fcntl(): %s\n", __func__, strerror(errno));
-    else
-    {
-        flags |= O_NONBLOCK;
-        if (fcntl(sockfd, F_SETFL, flags) == -1)
-            printf("<%s> Error fcntl(): %s\n", __func__, strerror(errno));
-    }
-*/
+
     return sockfd;
 }
 //======================================================================
@@ -127,21 +117,16 @@ int create_client_socket_ip6(const char * host, const char *port)
 
     setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY,(void *) &sock_opt, sizeof(int));
 
+    ioctl(sockfd, FIONBIO, &sock_opt);
+
     if (connect(sockfd, (struct sockaddr *)(&sin6), sizeof(sin6))!=0)
     {
-        printf("<%s> Error connect(): %s\n", __func__, strerror(errno));
-        close(sockfd);
-        return -1;
-    }
-
-    int flags = fcntl(sockfd, F_GETFL);
-    if (flags == -1)
-        printf("<%s> Error fcntl(): %s\n", __func__, strerror(errno));
-    else
-    {
-        flags |= O_NONBLOCK;
-        if (fcntl(sockfd, F_SETFL, flags) == -1)
-            printf("<%s> Error fcntl(): %s\n", __func__, strerror(errno));
+        if (errno != EINPROGRESS)
+        {
+            fprintf(stderr, "<%s:%d> Error connect(): %s\n", __func__, __LINE__, strerror(errno));
+            close(sockfd);
+            return -1;
+        }
     }
 
     return sockfd;

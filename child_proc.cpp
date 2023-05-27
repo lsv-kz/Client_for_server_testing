@@ -86,9 +86,10 @@ gettimeofday(&time1, NULL);
 
         ++all_conn;
 
+        req->num_proc = numProc;
         req->num_conn = i;
         req->num_req = 0;
-        req->req.p = buf_req;
+        req->req.ptr = buf_req;
         req->req.len = strlen(buf_req);
         req->req.i = 0;
         req->read_bytes = 0;

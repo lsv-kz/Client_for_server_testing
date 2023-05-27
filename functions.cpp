@@ -138,12 +138,7 @@ int parse_headers(Connect *r, char *pName)
     else if (!strcmp_case(pName, "Transfer-Encoding"))
     {
         if (strstr_case(pVal, "chunked"))
-        {
-            //r->chunk.end = 0;
             r->chunk.chunk = 1;
-        }
-        //else
-        //    r->chunk.chunk = 0;
     }
 
     return 0;
@@ -165,18 +160,18 @@ int create_log_file()
 int get_size_chunk(Connect *r)
 {
     r->chunk.size = -1;
-    char *p = strstr(r->resp.tail, "\r\n");
+    char *p = (char*)memchr(r->resp.ptr, '\n', r->resp.len);
     if (!p)
+        return ERR_TRY_AGAIN;
+
+    int n = p - r->resp.ptr + 1;
+    if (n > 8)
         return -1;
 
-    int n = p - r->resp.tail + 2;
-
-    if (sscanf(r->resp.tail, "%x", &r->chunk.size) == 1)
+    if (sscanf(r->resp.ptr, "%x", &r->chunk.size) == 1)
     {
-        if (r->chunk.size > 65536)
-            return -1;
-        r->resp.tail += n;
-        r->resp.lenTail -= n;
+        r->resp.ptr += n;
+        r->resp.len -= n;
         return r->chunk.size;
     }
     else
@@ -185,6 +180,12 @@ int get_size_chunk(Connect *r)
 //======================================================================
 void hex_dump_stderr(const void *p, int n)
 {
+    if (!p)
+    {
+        fprintf(stderr, "<%s>------------------ p=%p -------------------\n", __func__, p);
+        return;
+    }
+
     int count, addr = 0, col;
     const unsigned char *buf = (unsigned char *)p;
     char str[18];
@@ -203,4 +204,33 @@ void hex_dump_stderr(const void *p, int n)
         fprintf(stderr, "%*s  %s\n",(16 - (col)) * 3, "", str);
     }
     fprintf(stderr, "-------------------------------------------------\n");
+}
+//======================================================================
+void hex_dump_stderr(const char *s, int line, const void *p, int n)
+{
+    if (!p)
+    {
+        fprintf(stderr, "<%s:%d>------------------ p=%p -------------------\n", s, line, p);
+        return;
+    }
+
+    int count, addr = 0, col;
+    unsigned char *buf = (unsigned char*)p;
+    char str[18];
+    fprintf(stderr, "<%s:%d>--------------- HEX ---------------\n", s, line);
+    for(count = 0; count < n;)
+    {
+        fprintf(stderr, "%08X  ", addr);
+        for(col = 0, addr = addr + 0x10; (count < n) && (col < 16); count++, col++)
+        {
+            if (col == 8) fprintf(stderr, " ");
+            fprintf(stderr, "%02X ", *(buf+count));
+            str[col] = (*(buf + count) >= 32 && *(buf + count) < 127) ? *(buf + count) : '.';
+        }
+        str[col] = 0;
+        if (col <= 8) fprintf(stderr, " ");
+        fprintf(stderr, "%*s  %s\n",(16 - (col)) * 3, "", str);
+    }
+    
+    fprintf(stderr, "--------------------------------------\n");
 }
