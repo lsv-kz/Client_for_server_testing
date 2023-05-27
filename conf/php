@@ -1,4 +1,4 @@
-GET /php/env.php?abc=qwerty HTTP/1.1
+GET /env.php?abc=qwerty HTTP/1.1
 Host: localhost
 User-Agent: client
 # Connection: close

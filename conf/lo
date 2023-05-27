@@ -1,8 +1,6 @@
-GET /media/Zhandarm1964.mkv HTTP/1.1
-#GET /media/1.mp4 HTTP/1.1
+GET /1.txt HTTP/1.1
 Host: localhost
 User-Agent: client
 # Connection: close
 Connection: keep-alive
-Range: bytes=1000-1000999
 
