@@ -1,6 +1,0 @@
-GET /php/cwd.php?name=qwerty HTTP/1.1
-Host: localhost
-User-Agent: client
-# Connection: close
-Connection: keep-alive
-

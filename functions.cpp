@@ -130,6 +130,7 @@ int parse_headers(Connect *r, char *pName)
     else if (!strcmp_case(pName, "content-length"))
     {
         sscanf(pVal, "%ld", &r->cont_len);
+        r->chunk.chunk = 0;
     }
     else if (!strcmp_case(pName, "server"))
     {

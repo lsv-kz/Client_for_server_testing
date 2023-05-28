@@ -2,12 +2,6 @@
 
 using namespace std;
 
-//    #define POLLIN      0x0001    /* Можно считывать данные */
-//    #define POLLPRI     0x0002    /* Есть срочные данные */
-//    #define POLLOUT     0x0004    /* Запись не будет блокирована */
-//    #define POLLERR     0x0008    /* Произошла ошибка */
-//    #define POLLHUP     0x0010    /* "Положили трубку" */
-//    #define POLLNVAL    0x0020    /* Неверный запрос: fd не открыт */
 void get_time(char *s, int size);
 /*====================================================================*/
 int wait_read(int fd, int timeout)
