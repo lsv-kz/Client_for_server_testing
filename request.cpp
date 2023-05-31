@@ -13,11 +13,11 @@ static condition_variable cond_;
 
 struct pollfd *poll_fd;
 
-static int good_conn = 0, num_conn = 0, good_req = 0;
+static int good_conn = 0, good_req = 0, num_conn = 0;
 static long long allRD = 0;
 static int num_poll;
 
-static void worker(Connect *r, int num_proc);
+static void worker(Connect *r);
 int get_size_chunk(Connect *r);
 int chunk(Connect *r);
 //======================================================================
@@ -83,16 +83,14 @@ void end_request(Connect *r)
         
         if ((r->num_req < conf->num_requests) && r->connKeepAlive)
         {
-            r->req.i = 0;
-            r->read_bytes = 0;
+            r->operation = SEND_REQUEST;
             push_to_wait_list(r);
             return;
         }
-        ++good_conn;
     }
     else
     {
-        fprintf(stderr, "[%d/%d/%d]<%s:%d> [%d] read_bytes=%ld\n", r->num_proc, r->num_conn, r->num_req,  
+        fprintf(stderr, "[%d/%d/%d]<%s:%d> [%d] read_bytes=%lld\n", r->num_proc, r->num_conn, r->num_req,  
                 __func__, __LINE__, r->respStatus, r->read_bytes);
     }
 
@@ -118,7 +116,8 @@ static int set_poll(int num_proc)
 
         if ((t - r->sock_timer) >= conf->Timeout)
         {
-            fprintf(stderr, "[%d]<%s:%d> Timeout=%ld\n", num_proc, __func__, __LINE__, t - r->sock_timer);
+            fprintf(stderr, "[%d]<%s:%d> Timeout=%ld, %s\n", num_proc, __func__, __LINE__, 
+                            t - r->sock_timer, get_str_operation(r->operation));
             r->err = -1;
             del_from_list(r);
             end_request(r);
@@ -156,12 +155,12 @@ int poll_worker(int num_proc)
         if (poll_fd[i].revents == POLLOUT)
         {
             --ret;
-            worker(r, num_proc);
+            worker(r);
         }
         else if (poll_fd[i].revents & POLLIN)
         {
             --ret;
-            worker(r, num_proc);
+            worker(r);
         }
         else if (poll_fd[i].revents)
         {
@@ -179,6 +178,7 @@ int poll_worker(int num_proc)
 //======================================================================
 void thr_client(int num_proc)
 {
+    int Timeout = 5;
     num_conn = conf->num_connections;
     
     poll_fd = new(nothrow) struct pollfd [conf->num_connections];
@@ -194,7 +194,12 @@ void thr_client(int num_proc)
     unique_lock<mutex> lk(mtx_);
             while ((!work_list_start) && (!wait_list_start) && (num_conn))
             {
-                cond_.wait(lk);
+                if (cond_.wait_for(lk, chrono::milliseconds(1000 * Timeout)) == cv_status::timeout)
+                {
+                    fprintf(stderr, "<%s:%d> Timeout wait_for(): %d s, num_conn=%d\n", 
+                                    __func__, __LINE__, Timeout, num_conn);
+                    num_conn = 0;
+                }
             }
 
             if (num_conn == 0)
@@ -206,6 +211,8 @@ void thr_client(int num_proc)
         if (poll_worker(num_proc) < 0)
             break;
     }
+
+    delete [] poll_fd;
 }
 //======================================================================
 void push_to_wait_list(Connect *r)
@@ -213,8 +220,9 @@ void push_to_wait_list(Connect *r)
     r->err = 0;
     r->respStatus = 0;
     r->event = POLLOUT;
-    r->operation = SEND_REQUEST;
     r->sock_timer = 0;
+    r->read_bytes = 0;
+    r->req.i = 0;
     r->chunk.chunk = 0;
     r->chunk.end = 0;
     r->next = NULL;
@@ -249,10 +257,16 @@ int send_headers(Connect *r)
     return wr;
 }
 //======================================================================
-static void worker(Connect *r, int num_proc)
+static void worker(Connect *r)
 {
-    if (r->operation == SEND_REQUEST)
+    if ((r->operation == SEND_REQUEST) || (r->operation == CONNECT))
     {
+        if (r->operation == CONNECT)
+        {
+            r->operation = SEND_REQUEST;
+            ++good_conn;
+        }
+
         int wr = send_headers(r);
         if (wr > 0)
         {
@@ -261,7 +275,7 @@ static void worker(Connect *r, int num_proc)
                 r->sock_timer = 0;
                 r->operation = READ_RESP_HEADERS;
                 r->event = POLLIN;
-                r->resp.len = 0;
+                r->resp.len = r->resp.lenTail = 0;
                 r->resp.ptr = NULL;
                 r->resp.p_newline = r->resp.buf;
                 r->cont_len = 0;
@@ -272,7 +286,10 @@ static void worker(Connect *r, int num_proc)
         else if (wr < 0)
         {
             if (wr == ERR_TRY_AGAIN)
-                ;
+            {
+                //fprintf(stderr, "[%d/%d/%d]<%s:%d> TRY_AGAIN\n", r->num_proc, r->num_conn, r->num_req,  
+                //                                __func__, __LINE__);
+            }
             else
             {
                 r->err = -1;
@@ -297,8 +314,8 @@ static void worker(Connect *r, int num_proc)
         }
         else if (ret > 0)
         {
-            allRD += r->resp.len;
-            r->read_bytes += r->resp.len;
+            allRD += r->resp.lenTail;
+            r->read_bytes += r->resp.lenTail;
             r->operation = READ_ENTITY;
             if (!strcmp(Method, "HEAD"))
             {
@@ -308,6 +325,8 @@ static void worker(Connect *r, int num_proc)
             }
 
             r->sock_timer = 0;
+            r->resp.len = r->resp.lenTail;
+            r->resp.lenTail = 0;
             if (r->chunk.chunk)
             {
                 int ret = chunk(r);
@@ -340,7 +359,8 @@ static void worker(Connect *r, int num_proc)
     {
         if (r->chunk.chunk == 0)
         {
-            int len = (r->cont_len > (int)sizeof(r->resp.buf)) ? (int)sizeof(r->resp.buf) : r->cont_len;
+            char  buf[SIZE_BUF];
+            int len = (r->cont_len > SIZE_BUF) ? SIZE_BUF : r->cont_len;
             if (len == 0)
             {
                 del_from_list(r);
@@ -348,7 +368,8 @@ static void worker(Connect *r, int num_proc)
                 return;
             }
 
-            int ret = read_from_server(r, r->resp.buf, len);
+            int ret = read_from_server(r, buf, len);
+            //int ret = read_from_server(r, r->resp.buf, len);
             if (ret < 0)
             {
                 if (ret != ERR_TRY_AGAIN)
@@ -383,7 +404,7 @@ static void worker(Connect *r, int num_proc)
             if (r->chunk.size > 0)
             {
                 r->resp.ptr = r->resp.buf;
-                int len = (r->chunk.size > (int)sizeof(r->resp.buf)) ? (int)sizeof(r->resp.buf) : r->chunk.size;
+                int len = (r->chunk.size > SIZE_BUF) ? SIZE_BUF : r->chunk.size;
                 int ret = read_from_server(r, r->resp.buf, len);
                 if (ret < 0)
                 {
@@ -424,7 +445,7 @@ static void worker(Connect *r, int num_proc)
             {
                 if (r->chunk.size == -1)
                 {
-                    int len = sizeof(r->resp.buf) - r->resp.len - 1;
+                    int len = SIZE_BUF - r->resp.len - 1;
                     int ret = read_from_server(r, r->resp.buf + r->resp.len, len);
                     if (ret < 0)
                     {
@@ -437,7 +458,7 @@ static void worker(Connect *r, int num_proc)
                     }
                     else if (ret == 0)
                     {
-                        fprintf(stderr, "<%s:%d:%d:%d> read_from_server()=0/%ld\n", 
+                        fprintf(stderr, "<%s:%d:%d:%d> read_from_server()=0/%lld\n", 
                                         __func__, __LINE__, r->num_conn, r->num_req, r->read_bytes);
                         r->err = -1;
                         del_from_list(r);
@@ -468,7 +489,7 @@ static void worker(Connect *r, int num_proc)
                 }
                 else
                 {
-                    fprintf(stderr, "<%s:%d:%d:%d> ------r->chunk.size=%d-------\n", __func__, __LINE__, r->num_conn, r->num_req, r->chunk.size);
+                    fprintf(stderr, "<%s:%d:%d:%d> r->chunk.size=%ld\n", __func__, __LINE__, r->num_conn, r->num_req, r->chunk.size);
                 }
             }
         }
@@ -525,7 +546,7 @@ int chunk(Connect *r)
             }
             else
             {
-                fprintf(stderr, "<%s:%d:%d:%d> ??? r->resp.len=%d\n", 
+                fprintf(stderr, "<%s:%d:%d:%d> ??? r->resp.len=%ld\n", 
                         __func__, __LINE__, r->num_conn, r->num_req, r->resp.len);
                 return -1;
             }

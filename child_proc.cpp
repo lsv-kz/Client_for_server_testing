@@ -26,7 +26,6 @@ void get_time_connect(struct timeval *time1, char *buf, int size_buf)
 int child_proc(int numProc, const char *buf_req)
 {
     struct timeval time1;
-    int i;
     char s[256];
 
     struct rlimit lim;
@@ -67,9 +66,8 @@ int child_proc(int numProc, const char *buf_req)
     }
 
 gettimeofday(&time1, NULL);
-    i = 0;
     int all_conn = 0;
-    while (i < conf->num_connections)
+    while (all_conn < conf->num_connections)
     {
         Connect *req = new(nothrow) Connect;
         if (!req)
@@ -78,25 +76,28 @@ gettimeofday(&time1, NULL);
             exit(1);
         }
 
-        req->servSocket = conf->create_sock(conf->ip, conf->port);
+        int err;
+        req->servSocket = conf->create_sock(conf->ip, conf->port, &err);
         if (req->servSocket < 0)
         {
-            exit(1);
+            fprintf(stderr, "%d<%s:%d> Error create_sock(): num_conn=%d\n", numProc, __func__, __LINE__, all_conn + 1);
+            break;
         }
 
-        ++all_conn;
+        if (err == 0)
+            req->operation = SEND_REQUEST;
+        else
+            req->operation = CONNECT;
 
         req->num_proc = numProc;
-        req->num_conn = i;
+        req->num_conn = all_conn;
         req->num_req = 0;
         req->req.ptr = buf_req;
         req->req.len = strlen(buf_req);
-        req->req.i = 0;
-        req->read_bytes = 0;
-        
+
         push_to_wait_list(req);
         
-        ++i;
+        ++all_conn;
     }
 
     thr.join();

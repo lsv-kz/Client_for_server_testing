@@ -56,11 +56,13 @@ int create_client_socket(const char *host, const char *port)
     return sockfd;
 }
 //======================================================================
-int create_client_socket_ip4(const char *ip, const char *port)
+int create_client_socket_ip4(const char *ip, const char *port, int *err)
 {
     int sockfd;
     struct sockaddr_in sin4;
     const int sock_opt = 1;
+
+    *err = 0;
 
     memset(&sin4, 0, sizeof(sin4));
 
@@ -92,16 +94,20 @@ int create_client_socket_ip4(const char *ip, const char *port)
             close(sockfd);
             return -1;
         }
+        else
+            *err = ERR_TRY_AGAIN;
     }
 
     return sockfd;
 }
 //======================================================================
-int create_client_socket_ip6(const char * host, const char *port)
+int create_client_socket_ip6(const char * host, const char *port, int *err)
 {
     int sockfd;
     struct sockaddr_in6 sin6;
     const int sock_opt = 1;
+
+    *err = 0;
 
     memset(&sin6, 0, sizeof(sin6));
     sin6.sin6_family = PF_INET6;
@@ -127,6 +133,8 @@ int create_client_socket_ip6(const char * host, const char *port)
             close(sockfd);
             return -1;
         }
+        else
+            *err = ERR_TRY_AGAIN;
     }
 
     return sockfd;

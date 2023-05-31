@@ -39,7 +39,9 @@ extern const char *end_line;
 
 const int  ERR_TRY_AGAIN = -1000;
 
-enum OPERATION_TYPE { SEND_REQUEST = 1, READ_RESP_HEADERS, READ_ENTITY, };
+const int  SIZE_BUF = 32768;
+
+enum OPERATION_TYPE { CONNECT = 1, SEND_REQUEST, READ_RESP_HEADERS, READ_ENTITY, };
 
 struct Config {
     int  num_connections;
@@ -51,7 +53,7 @@ struct Config {
     char ip[256];
     char port[32];
     const char *req;
-    int (*create_sock)(const char*, const char*);
+    int (*create_sock)(const char*, const char*, int*);
 };
 extern const Config* const conf;
 //----------------------------------------------------------------------
@@ -83,8 +85,9 @@ struct Connect {
 
     struct
     {
-        char  buf[32768];
-        int   len;
+        char  buf[SIZE_BUF];
+        long  len;
+        long  lenTail;
         char  *ptr;
         char  *p_newline;
     } resp;
@@ -92,15 +95,15 @@ struct Connect {
     struct
     {
         int  chunk;
-        int  size;
+        long  size;
         int  end;
     } chunk;
 
     char   server[128];
-    long   cont_len;
+    long long  cont_len;
     int    connKeepAlive;
     int    respStatus;
-    long   read_bytes;
+    long long  read_bytes;
 };
 //----------------------------------------------------------------------
 int child_proc(int, const char*);
@@ -126,8 +129,8 @@ int read_from_server(Connect *req, char *buf, int len);
 int read_http_headers(Connect *r);
 //----------------------------------------------------------------------
 int create_client_socket(const char * host, const char *port);
-int create_client_socket_ip4(const char *ip, const char *port);
-int create_client_socket_ip6(const char *ip, const char *port);
+int create_client_socket_ip4(const char *ip, const char *port, int*);
+int create_client_socket_ip6(const char *ip, const char *port, int*);
 int get_ip(int sock, char *ip, int size_ip);
 const char *get_str_ai_family(int ai_family);
 //----------------------------------------------------------------------
@@ -137,6 +140,7 @@ int strcmp_case(const char *s1, const char *s2);
 int strlcmp_case(const char *s1, const char *s2, int len);
 int parse_headers(Connect *r, char *s);
 int create_log_file();
+const char *get_str_operation(OPERATION_TYPE n);
 void hex_dump_stderr(const void *p, int n);
 void hex_dump_stderr(const char *s, int line, const void *p, int n);
 

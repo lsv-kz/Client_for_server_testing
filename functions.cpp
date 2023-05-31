@@ -129,7 +129,7 @@ int parse_headers(Connect *r, char *pName)
     }
     else if (!strcmp_case(pName, "content-length"))
     {
-        sscanf(pVal, "%ld", &r->cont_len);
+        sscanf(pVal, "%lld", &r->cont_len);
         r->chunk.chunk = 0;
     }
     else if (!strcmp_case(pName, "server"))
@@ -169,7 +169,7 @@ int get_size_chunk(Connect *r)
     if (n > 8)
         return -1;
 
-    if (sscanf(r->resp.ptr, "%x", &r->chunk.size) == 1)
+    if (sscanf(r->resp.ptr, "%lx", &r->chunk.size) == 1)
     {
         r->resp.ptr += n;
         r->resp.len -= n;
@@ -177,6 +177,23 @@ int get_size_chunk(Connect *r)
     }
     else
         return -1;
+}
+//======================================================================
+const char *get_str_operation(OPERATION_TYPE n)
+{
+    switch (n)
+    {
+        case CONNECT:
+            return "CONNECT";
+        case SEND_REQUEST:
+            return "SEND_REQUEST";
+        case READ_RESP_HEADERS:
+            return "READ_RESP_HEADERS";
+        case READ_ENTITY:
+            return "READ_ENTITY";
+    }
+
+    return "?";
 }
 //======================================================================
 void hex_dump_stderr(const void *p, int n)
