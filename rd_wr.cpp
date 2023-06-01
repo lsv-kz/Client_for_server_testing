@@ -28,7 +28,7 @@ retry:
     }
     else if (!ret)
         return -408;
-    
+
     if (fdrd.revents & POLLIN)
         return 1;
     else if (fdrd.revents & POLLHUP)

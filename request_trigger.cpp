@@ -5,33 +5,31 @@ using namespace std;
 static Connect *work_list_start = NULL;
 static Connect *work_list_end = NULL;
 
-static Connect *wait_list_start = NULL;
-static Connect *wait_list_end = NULL;
-
 static mutex mtx_;
 static condition_variable cond_;
 
 static struct pollfd *poll_fd;
 
-static int good_conn = 0, good_req = 0, num_conn, all_conn;
+static int good_conn = 0, good_req = 0, num_conn = 0;
 static long long allRD = 0;
 static int num_poll;
 
 static void worker(Connect *r);
 int get_size_chunk(Connect *r);
 int chunk(Connect *r);
+int send_headers(Connect *r);
 //======================================================================
-int get_good_req(void)
+int trig_get_good_req(void)
 {
     return good_req;
 }
 //======================================================================
-int get_good_conn(void)
+int trig_get_good_conn(void)
 {
     return good_conn;
 }
 //======================================================================
-long long get_all_read(void)
+long long trig_get_all_read(void)
 {
     return allRD;
 }
@@ -57,23 +55,6 @@ static void del_from_list(Connect *r)
         work_list_start = work_list_end = NULL;
 }
 //======================================================================
-static void add_work_list()
-{
-mtx_.lock();
-    if (wait_list_start)
-    {
-        if (work_list_end)
-            work_list_end->next = wait_list_start;
-        else
-            work_list_start = wait_list_start;
-
-        wait_list_start->prev = work_list_end;
-        work_list_end = wait_list_end;
-        wait_list_start = wait_list_end = NULL;
-    }
-mtx_.unlock();
-}
-//======================================================================
 static void end_request(Connect *r)
 {
     if ((r->err == 0) && (r->respStatus < 300))
@@ -84,22 +65,21 @@ static void end_request(Connect *r)
         if ((r->num_req < conf->num_requests) && r->connKeepAlive)
         {
             r->operation = SEND_REQUEST;
-            push_to_wait_list(r);
+            trig_push_to_wait_list(r);
             return;
         }
     }
     else
     {
-        fprintf(stderr, "[%d/%d/%d]<%s:%d> [%d] read_bytes=%lld\n", r->num_proc, r->num_conn, r->num_req,  
-                __func__, __LINE__, r->respStatus, r->read_bytes);
+        fprintf(stderr, "[%d/%d/%d]<%s:%d> [%d] read_bytes=%lld, %s\n", r->num_proc, r->num_conn, r->num_req,  
+                __func__, __LINE__, r->respStatus, r->read_bytes, get_str_operation(r->operation));
     }
 
     shutdown(r->servSocket, SHUT_RDWR);
     close(r->servSocket);
     delete r;
-mtx_.lock();
-    ++num_conn;
-mtx_.unlock();
+
+    --num_conn;
 }
 //======================================================================
 static int set_poll(int num_proc)
@@ -114,10 +94,9 @@ static int set_poll(int num_proc)
         if (r->sock_timer == 0)
             r->sock_timer = t;
 
-        if ((t - r->sock_timer) >= conf->Timeout)
+        if (((t - r->sock_timer) >= conf->Timeout) && (r->sock_timer != 0))
         {
-            fprintf(stderr, "[%d]<%s:%d> Timeout=%ld, %s\n", num_proc, __func__, __LINE__, 
-                            t - r->sock_timer, get_str_operation(r->operation));
+            fprintf(stderr, "[%d]<%s:%d> Timeout=%ld, %s\n", num_proc, __func__, __LINE__, t - r->sock_timer, get_str_operation(r->operation));
             r->err = -1;
             del_from_list(r);
             end_request(r);
@@ -176,38 +155,27 @@ static int poll_worker(int num_proc)
     return 0;
 }
 //======================================================================
-void thr_client(int num_proc)
-{
-    int Timeout = 5;
-    num_conn = 0;
-    all_conn = conf->num_connections;
-    
+void thr_client_trigger(int num_proc)
+{   
     poll_fd = new(nothrow) struct pollfd [conf->num_connections];
     if (!poll_fd)
     {
         fprintf(stderr, "[%d]<%s:%d> Error malloc(): %s\n", num_proc, __func__, __LINE__, strerror(errno));
         exit(1);
     }
-    
+
+    {
+    unique_lock<mutex> lk(mtx_);
+        while (num_conn == 0)
+        {
+            cond_.wait(lk);
+        }
+    }
+
     while (1)
     {
-        {
-    unique_lock<mutex> lk(mtx_);
-            while ((!work_list_start) && (!wait_list_start) && (num_conn < all_conn))
-            {
-                if (cond_.wait_for(lk, chrono::milliseconds(1000 * Timeout)) == cv_status::timeout)
-                {
-                    fprintf(stderr, "<%s:%d> Timeout wait_for(): %d s, num_conn=%d\n", 
-                                    __func__, __LINE__, Timeout, num_conn);
-                    num_conn = all_conn;
-                }
-            }
-
-            if (num_conn >= all_conn)
-                break;
-        }
-
-        add_work_list();
+        if (num_conn == 0)
+            break;
         set_poll(num_proc);
         if (poll_worker(num_proc) < 0)
             break;
@@ -216,7 +184,7 @@ void thr_client(int num_proc)
     delete [] poll_fd;
 }
 //======================================================================
-void push_to_wait_list(Connect *r)
+void trig_push_to_wait_list(Connect *r)
 {
     r->err = 0;
     r->respStatus = 0;
@@ -227,43 +195,23 @@ void push_to_wait_list(Connect *r)
     r->chunk.chunk = 0;
     r->chunk.end = 0;
     r->next = NULL;
-mtx_.lock();
-    r->prev = wait_list_end;
-    if (wait_list_start)
+
+    r->prev = work_list_end;
+    if (work_list_start)
     {
-        wait_list_end->next = r;
-        wait_list_end = r;
+        work_list_end->next = r;
+        work_list_end = r;
     }
     else
-        wait_list_start = wait_list_end = r;
-mtx_.unlock();
-    cond_.notify_one();
+        work_list_start = work_list_end = r;
 }
 //======================================================================
-void set_all_conn(int n)
+void trigger(int n)
 {
 mtx_.lock();
-    all_conn = n;
+    num_conn = n;
 mtx_.unlock();
     cond_.notify_one();
-}
-//======================================================================
-int send_headers(Connect *r)
-{
-    int wr = write_to_serv(r, r->req.ptr + r->req.i, r->req.len - r->req.i);
-    if (wr < 0)
-    {
-        if (wr == ERR_TRY_AGAIN)
-            return ERR_TRY_AGAIN;
-        else
-            return -1;
-    }
-    else if (wr > 0)
-    {
-        r->req.i += wr;
-    }
-
-    return wr;
 }
 //======================================================================
 static void worker(Connect *r)
@@ -295,10 +243,8 @@ static void worker(Connect *r)
         else if (wr < 0)
         {
             if (wr == ERR_TRY_AGAIN)
-            {
-                //fprintf(stderr, "[%d/%d/%d]<%s:%d> TRY_AGAIN\n", r->num_proc, r->num_conn, r->num_req,  
-                //                        __func__, __LINE__);
-            }
+                fprintf(stderr, "[%d/%d/%d]<%s:%d> TRY_AGAIN\n", r->num_proc, r->num_conn, r->num_req,  
+                                        __func__, __LINE__);
             else
             {
                 r->err = -1;
@@ -498,80 +444,9 @@ static void worker(Connect *r)
                 }
                 else
                 {
-                    fprintf(stderr, "<%s:%d:%d:%d> r->chunk.size=%ld\n", __func__, __LINE__, r->num_conn, r->num_req, r->chunk.size);
+                    fprintf(stderr, "<%s:%d:%d:%d> ------r->chunk.size=%ld-------\n", __func__, __LINE__, r->num_conn, r->num_req, r->chunk.size);
                 }
             }
         }
     }
-}
-//======================================================================
-int chunk(Connect *r)
-{
-    if (!r->resp.ptr || !r->resp.len)
-    {
-        r->resp.len = 0;
-        r->resp.ptr = r->resp.buf;
-        r->chunk.size = -1;
-        return 0;
-    }
-
-    while (1)
-    {
-        r->chunk.size = get_size_chunk(r);
-        if (r->chunk.size > 0)
-        {
-            if (r->resp.len > (r->chunk.size + 2))
-            {
-                r->resp.ptr += (r->chunk.size + 2);
-                r->resp.len -= (r->chunk.size + 2);
-                continue;
-            }
-            else if (r->resp.len == (r->chunk.size + 2))
-            {
-                r->resp.len = 0;
-                r->resp.ptr = r->resp.buf;
-                r->chunk.size = -1;
-                break;
-            }
-            else // r->resp.len < (r->chunk.size + 2)
-            {
-                r->chunk.size -= (r->resp.len - 2);
-                r->resp.len = 0;
-                break;
-            }
-        }
-        else if (r->chunk.size == 0)
-        {
-            r->chunk.end = 1;
-            if (r->resp.len == 2)
-            {
-                return 1;
-            }
-            else if (r->resp.len < 2)
-            {
-                r->chunk.size = 2 - r->resp.len;
-                r->resp.len = 0;
-                break;
-            }
-            else
-            {
-                fprintf(stderr, "<%s:%d:%d:%d> ??? r->resp.len=%ld\n", 
-                        __func__, __LINE__, r->num_conn, r->num_req, r->resp.len);
-                return -1;
-            }
-        }
-        else
-        {
-            if (r->chunk.size == ERR_TRY_AGAIN)
-            {
-                memmove(r->resp.buf, r->resp.ptr, r->resp.len);
-                r->resp.ptr = r->resp.buf;
-                r->chunk.size = -1;
-                break;
-            }
-            else
-                return -1;
-        }
-    }
-    return 0;
 }

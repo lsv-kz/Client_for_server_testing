@@ -1,6 +1,9 @@
 #include "client.h"
 
 using namespace std;
+
+void set_all_conn(int n);
+void trigger(int n);
 //======================================================================
 void get_time_connect(struct timeval *time1, char *buf, int size_buf)
 {
@@ -57,7 +60,10 @@ int child_proc(int numProc, const char *buf_req)
     thread thr;
     try
     {
-        thr = thread(thr_client, numProc);
+        if (conf->Trigger == 'y')
+            thr = thread(thr_client_trigger, numProc);
+        else
+            thr = thread(thr_client, numProc);
     }
     catch (...)
     {
@@ -95,17 +101,33 @@ gettimeofday(&time1, NULL);
         req->req.ptr = buf_req;
         req->req.len = strlen(buf_req);
 
-        push_to_wait_list(req);
+        if (conf->Trigger == 'y')
+            trig_push_to_wait_list(req);
+        else
+            push_to_wait_list(req);
         
         ++all_conn;
     }
+
+    if (conf->Trigger == 'y')
+        trigger(all_conn);
+    else
+        set_all_conn(all_conn);
 
     thr.join();
 
 get_time_connect(&time1, s, sizeof(s));
 
-    printf("-[%d]  %s, all_conn=%d, good_conn=%d, good_req=%d\n"
+    if (conf->Trigger == 'y')
+    {
+        printf("-[%d]  %s, all_conn=%d, good_conn=%d, good_req=%d\n"
+           "       all read = %lld\n", numProc, s, all_conn, trig_get_good_conn(), trig_get_good_req(), trig_get_all_read());
+    }
+    else
+    {
+        printf("-[%d]  %s, all_conn=%d, good_conn=%d, good_req=%d\n"
            "       all read = %lld\n", numProc, s, all_conn, get_good_conn(), get_good_req(), get_all_read());
+    }
 
     exit(0);    
 }

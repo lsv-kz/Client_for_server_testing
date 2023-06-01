@@ -47,6 +47,8 @@ struct Config {
     int  num_connections;
     int  num_requests;
 
+    char  Trigger;
+
     int  connKeepAlive;
     int  Timeout;
     int  TimeoutPoll;
@@ -112,6 +114,12 @@ int get_good_req(void);
 int get_good_conn(void);
 void thr_client(int num_proc);
 void push_to_wait_list(Connect *r);
+
+int trig_get_good_req(void);
+int trig_get_good_conn(void);
+long long trig_get_all_read(void);
+void thr_client_trigger(int num_proc);
+void trig_push_to_wait_list(Connect *r);
 //----------------------------------------------------------------------
 int read_headers_to_stdout(Connect *resp);
 int read_headers(Connect *req);

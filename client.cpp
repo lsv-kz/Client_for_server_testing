@@ -60,16 +60,27 @@ int read_conf_file()
             printf("TimeoutPoll: %d ms\n", c.TimeoutPoll);
             continue;
         }
+        else if (sscanf(p1, " Trigger %c", &c.Trigger) == 1)
+        {
+            if ((c.Trigger != 'n') && (c.Trigger != 'y'))
+            {
+                printf("!!! Error read conf file: [%s]\n", p1);
+                fclose(f);
+                return -1;
+            }
+            printf("Trigger: '%c'\n", c.Trigger);
+            continue;
+        }
+        else
+        {
+            printf("!!! Error read conf file: [%s]\n", p1);
+            fclose(f);
+            return -1;
+        }
     }
 
     fclose(f);
 
-    if (strcmp(end_line, "\n") && strcmp(end_line, "\r\n"))
-    {
-        fprintf(stderr, " Error end_line ?\n");
-        return -1;
-    }
-    
     printf("\n");
 
     return 0;

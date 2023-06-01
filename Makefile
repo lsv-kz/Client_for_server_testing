@@ -10,6 +10,7 @@ DEPS = client.h
 OBJS = $(OBJSDIR)/client.o \
 	$(OBJSDIR)/child_proc.o \
 	$(OBJSDIR)/request.o \
+	$(OBJSDIR)/request_trigger.o \
 	$(OBJSDIR)/create_client_socket.o \
 	$(OBJSDIR)/rd_wr.o \
 	$(OBJSDIR)/functions.o 
@@ -25,6 +26,9 @@ $(OBJSDIR)/child_proc.o: child_proc.cpp client.h
 
 $(OBJSDIR)/request.o: request.cpp client.h
 	$(CC) $(CFLAGS) -c request.cpp -o $@
+
+$(OBJSDIR)/request_trigger.o: request_trigger.cpp client.h
+	$(CC) $(CFLAGS) -c request_trigger.cpp -o $@
 
 $(OBJSDIR)/create_client_socket.o: create_client_socket.cpp client.h
 	$(CC) $(CFLAGS) -c create_client_socket.cpp -o $@
